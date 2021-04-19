@@ -3,13 +3,14 @@
  * FILE          : cpurtt_common.h
  * DESCRIPTION   : CPU Runtime Test driver
  * CREATED       : 2021.02.15
- * MODIFIED      : 2021.03.12
+ * MODIFIED      : 2021.04.15
  * AUTHOR        : Renesas Electronics Corporation
  * TARGET DEVICE : R-Car V3H
  * TARGET OS     : BareMetal
  * HISTORY       :
  *                 2021.02.15 Create New File corresponding to BareMetal
  *                 2021.03.12 Fix for beta2 release
+ *                 2021.04.15 Fix for beta3 release
  */
 /****************************************************************************/
 /*
@@ -30,10 +31,6 @@
 extern "C"
 {
 #endif
-
-#include <linux/ioctl.h>
-
-//#include "rcar-xos/cpurtt_drv/fieldbist_api.h"
 
 /* for smoni_api parameter */
 typedef struct {
@@ -111,13 +108,9 @@ typedef struct {
 #define DRV_CPURTT_IOCTL_DEVFBISTDEINIT  _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 4 )
 #define DRV_CPURTT_IOCTL_WAIT_CALLBACK  _IOWR( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 5 , drvCPURTT_CallbackInfo_t)
 
-/* test用fbist割り込みアフィニティの切り替え用。*/
-#define DRV_CPURTT_IOCTL_CHANGE_SETAFFMODE  _IOWR( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 6 , uint16_t)
-
 #define UDF_CPURTT_DRIVER_NAME        "cpurttdrv"     /* cpurtt driver name */
 #define UDF_CPURTT_CLASS_NAME         "cpurttmod"     /* cpurtt driver class name */
 #define UDF_CPURTT_MODULE_NAME        "cpurttmod0"    /* cpurtt driver minor number */
-#define UDF_CPURTT_UIO_DRIVER_NAME    "fbc_uio_share"     /* cpurtt driver name for uio */
 
 #define DRV_CPURTT_CB_REQ_NON           (0x00000000U)
 #define DRV_CPURTT_CB_REQ_CALLBACK      (0x00000001U)

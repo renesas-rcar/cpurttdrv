@@ -1,17 +1,17 @@
 /****************************************************************************/
 /*
- * FILE          : 
- * DESCRIPTION   : 
- * CREATED       :
- * MODIFIED      :
+ * FILE          : cpurttdrv.c
+ * DESCRIPTION   : CPU Runtime Test driver for sample code
+ * CREATED       : 2021.04.17
+ * MODIFIED      : -
  * AUTHOR        : Renesas Electronics Corporation
  * TARGET DEVICE : R-Car V3H
- * TARGET OS     :
- * HISTORY       :
+ * TARGET OS     : BareMetal
+ * HISTORY       : -
  */
 /****************************************************************************/
 /*
- * Copyright(C) 2020 Renesas Electronics Corporation. All Rights Reserved.
+ * Copyright(C) 2021 Renesas Electronics Corporation. All Rights Reserved.
  * RENESAS ELECTRONICS CONFIDENTIAL AND PROPRIETARY
  * This program must be used solely for the purpose for which
  * it was furnished by Renesas Electronics Corporation.
@@ -24,7 +24,6 @@
  Includes <System Includes>, "Project Includes"
  ***********************************************************/
 
-#include <stddef.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/fs.h>
@@ -35,19 +34,15 @@
 #include <linux/smp.h>
 #include <linux/interrupt.h>
 #include <asm/io.h>
-#include <linux/printk.h>
 #include <linux/ioport.h>
 #include <asm/irqflags.h>
 #include <linux/completion.h>
-
 #include <linux/cpumask.h>
 #include <linux/cpuset.h>
 #include <linux/device.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
-
 #include <linux/semaphore.h>
-
 #include <linux/uio_driver.h>
 #include <linux/io.h>
 #include <linux/of_irq.h>
@@ -61,17 +56,11 @@
 
 #undef IS_INTERRUPT
 
-#define DRIVER_VERSION "0.1"
-
-MODULE_AUTHOR("RenesasElectronicsCorp.");
-MODULE_DESCRIPTION("CPURTT drive");
-MODULE_LICENSE("GPL v2");
+#define DRIVER_VERSION "0.2"
 
 /***********************************************************
  Macro definitions
  ***********************************************************/
-
-#define CPURTT_DEBUG 0
 
 /***********************************************************
  Typedef definitions
@@ -93,16 +82,18 @@ static struct class *cpurtt_class = NULL;
 static drvCPURTT_SmoniParam_t smoni_param;
 static uint32_t g_SmoniAddrBuf[DRV_CPURTTKER_CPUNUM_MAX][DRV_CPURTTKER_SMONI_BUF_SIZE]; /* address buffer for parameter of Smoni_RuntimeTestFbaWrite/Smoni_RuntimeTestFbaRead */
 static uint32_t g_SmoniDataBuf[DRV_CPURTTKER_CPUNUM_MAX][DRV_CPURTTKER_SMONI_BUF_SIZE]; /* data buffer for parameter of Smoni_RuntimeTestFbaWrite/Smoni_RuntimeTestFbaRead */
-static struct completion g_A2StartSynCompletion; /* A2 Runtime 開始同期用のcompletion*/
-static struct completion g_A2EndSynCompletion[DRV_CPURTTKER_CPUNUM_MAX]; /* A2 Runtime 実行完了確認用のcompletion*/
-volatile uint16_t g_A2SmoniResult[DRV_CPURTTKER_CPUNUM_MAX]; /* Smoni Api結果格納用 */
-static drvCPURTT_A2rttParam_t g_A2Param[DRV_CPURTTKER_CPUNUM_MAX]; /* A2 RuntimeTestパラメータ格納用 */
+static struct completion g_A2StartSynCompletion;
+static struct completion g_A2EndSynCompletion[DRV_CPURTTKER_CPUNUM_MAX];
+static struct completion g_A2ThWakeupCompletion[DRV_CPURTTKER_CPUNUM_MAX];
+
+volatile uint16_t g_A2SmoniResult[DRV_CPURTTKER_CPUNUM_MAX];
+static drvCPURTT_A2rttParam_t g_A2Param[DRV_CPURTTKER_CPUNUM_MAX];
 
 static struct task_struct *g_A2Task[DRV_CPURTTKER_CPUNUM_MAX];
 static uint32_t g_TaskExitFlg = 0;
 
 static wait_queue_head_t A2SyncWaitQue;
-static uint16_t g_A2SyncWait = 0;
+volatile static uint16_t g_A2SyncWait = 0;
 static struct semaphore A2SyncSem;
 
 static uint16_t A2SyncInfoTable[DRV_CPURTTKER_CPUNUM_MAX] = 
@@ -114,6 +105,7 @@ static uint16_t A2SyncInfoTable[DRV_CPURTTKER_CPUNUM_MAX] =
 };
 
 static void __iomem *g_RegBaseSgir = NULL;
+static void __iomem *g_RegBaseItargets11 = NULL;
 static void __iomem *g_RegBaseRttfinish1 = NULL;
 static void __iomem *g_RegBaseRttfinish2 = NULL;
 static void __iomem *g_RegBaseAddrTable[DRV_RTTKER_HIERARCHY_MAX] = {
@@ -187,14 +179,10 @@ static const uint32_t drvCPURTTKER_SgirData[5U] = {
 };
 
 static drvCPURTT_CbInfoQueue_t g_CallbackInfo;
-
-static struct platform_device *g_cpurtt_pdev = NULL;
-
 static struct semaphore CallbackSem;
 static bool FbistCloseReq;
 
-static uint64_t timerms[DRV_CPURTTKER_CPUNUM_MAX];
-static uint64_t timerus[DRV_CPURTTKER_CPUNUM_MAX];
+static struct platform_device *g_cpurtt_pdev = NULL;
 
 static int CpurttDrv_open(struct inode *inode, struct file *file);
 static int CpurttDrv_close(struct inode *inode, struct file *file);
@@ -210,7 +198,6 @@ static long drvCPURTT_UDF_FbistInit(void);
 static long drvCPURTT_UDF_FbistDeInit(void);
 static long drvCPURTT_UDF_WaitCbNotice(drvCPURTT_CallbackInfo_t *aParam);
 
-/*↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓以下からsampleを流用 ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓*/
 static int fbc_uio_share_clk_enable(struct fbc_uio_share_platform_data *pdata)
 {
     int ret;
@@ -220,15 +207,15 @@ static int fbc_uio_share_clk_enable(struct fbc_uio_share_platform_data *pdata)
         ret = clk_prepare_enable(pdata->clks[i]);
         if (ret) {
             dev_err(&pdata->pdev->dev, "Clock enable failed\n");
-            goto err;
+            break;
         }
     }
 
-    return 0;
-
-err:
-    for (i--; i >= 0; i--)
-        clk_disable_unprepare(pdata->clks[i]);
+    if (ret)
+    {
+        for (i--; i >= 0; i--)
+            clk_disable_unprepare(pdata->clks[i]);
+    }
 
     return ret;
 }
@@ -247,7 +234,6 @@ static irqreturn_t fbc_uio_share_irq_handler(int irq, struct uio_info *uio_info)
     uint32_t RegVal_fin2;
     drvRTT_hierarchy_t i;
     uint64_t FiniVal;
-    uint32_t CurrentCpuNum;
     uint32_t WriteRegVal;
     uint32_t HierarchyBit;
     uint32_t Address;
@@ -292,8 +278,6 @@ static irqreturn_t fbc_uio_share_irq_handler(int irq, struct uio_info *uio_info)
     Address = 0;
     Smoniret = 0;
     ReadRegVal.INT = 0U;
-
-    CurrentCpuNum = smp_processor_id();
 
     RegVal_fin1 = readl(g_RegBaseRttfinish1);
     RegVal_fin2 = readl(g_RegBaseRttfinish2);
@@ -383,62 +367,6 @@ static irqreturn_t fbc_uio_share_irq_handler(int irq, struct uio_info *uio_info)
     return IRQ_HANDLED;
 }
 
-static int fbc_uio_share_irq_control(struct uio_info *uio_info, s32 irq_on)
-{
-    struct fbc_uio_share_platform_data *priv = uio_info->priv;
-    unsigned long flags;
-
-    spin_lock_irqsave(&priv->lock, flags);
-    if (irq_on) {
-        if (__test_and_clear_bit(UIO_IRQ_DISABLED, &priv->flags))
-            enable_irq((unsigned int)uio_info->irq);
-    } else {
-        if (!__test_and_set_bit(UIO_IRQ_DISABLED, &priv->flags))
-            disable_irq((unsigned int)uio_info->irq);
-    }
-    spin_unlock_irqrestore(&priv->lock, flags);
-
-    return 0;
-}
-
-static int fbc_uio_share_open(struct uio_info *uio_info, __attribute__((unused)) struct inode *inode)
-{
-    struct fbc_uio_share_platform_data *priv = uio_info->priv;
-    int ret;
-    unsigned long flags;
-
-    dev_dbg(&priv->pdev->dev, "fbc_uio_share open\n");
-    pm_runtime_get_sync(&priv->pdev->dev);
-    ret = fbc_uio_share_clk_enable(priv);
-    if(ret)
-        goto err;
-
-    spin_lock_irqsave(&priv->lock, flags);
-    if (__test_and_clear_bit(UIO_IRQ_DISABLED, &priv->flags))
-        enable_irq((unsigned int)uio_info->irq);
-    spin_unlock_irqrestore(&priv->lock, flags);
-
-err:
-    pm_runtime_put_sync(&priv->pdev->dev);
-    return ret;
-}
-
-static int fbc_uio_share_close(struct uio_info *uio_info, __attribute__((unused)) struct inode *inode)
-{
-    struct fbc_uio_share_platform_data *priv = uio_info->priv;
-
-    dev_dbg(&priv->pdev->dev, "fbc_uio_share close\n");
-    fbc_uio_share_clk_disable(priv);
-    pm_runtime_put_sync(&priv->pdev->dev);
-
-    spin_lock(&priv->lock);
-    if (!__test_and_set_bit(UIO_IRQ_DISABLED, &priv->flags))
-        disable_irq((unsigned int)uio_info->irq);
-    spin_unlock(&priv->lock);
-
-    return 0;
-}
-
 static const struct fbc_uio_share_soc_res fbc_uio_share_soc_res = {
     .clk_names = (char*[]){
         "fbc_post",
@@ -493,31 +421,32 @@ static int fbc_uio_share_probe(struct platform_device *pdev)
     soc_res = of_device_get_match_data(dev);
     if (!soc_res)
     {
-            dev_err(dev, "failed to not match soc resource\n");
+        dev_err(dev, "failed to not match soc resource\n");
         return -EINVAL;
     }
 
     priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
-    if (!priv) {
-            dev_err(dev, "failed to alloc fbc_uio_share_platform_data memory\n");
+    if (!priv)
+    {
+        dev_err(dev, "failed to alloc fbc_uio_share_platform_data memory\n");
         return -ENOMEM;
     }
 
     /* Construct the uio_info structure */
     uio_info = devm_kzalloc(dev, sizeof(*uio_info), GFP_KERNEL);
-    if (!uio_info) {
-            dev_err(dev, "failed to alloc uio_info memory\n");
+    if (!uio_info)
+    {
+        dev_err(dev, "failed to alloc uio_info memory\n");
         return -ENOMEM;
     }
 
     uio_info->version = DRIVER_VERSION;
-    uio_info->open = fbc_uio_share_open;
-    uio_info->release = fbc_uio_share_close;
     uio_info->name = pdev->name;
 
     /* Set up memory resource */
     res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-    if (!res) {
+    if (!res)
+    {
         dev_err(dev, "failed to get fbc_uio_share memory\n");
         return -EINVAL;
     }
@@ -527,10 +456,6 @@ static int fbc_uio_share_probe(struct platform_device *pdev)
     uio_mem->addr = res->start;
     uio_mem->size = resource_size(res);
     uio_mem->name = res->name;
-
-//    ret = fbc_uio_share_init_mem(pdev, soc_res->reg_names, priv);
-//    if (ret)
-//        return ret;
 
     ret = fbc_uio_share_init_clocks(pdev, soc_res->clk_names, priv);
     if (ret<0)
@@ -546,7 +471,6 @@ static int fbc_uio_share_probe(struct platform_device *pdev)
         return -EINVAL;
     }
     uio_info->handler = fbc_uio_share_irq_handler;
-    uio_info->irqcontrol = fbc_uio_share_irq_control;
 
     uio_info->priv = priv;
 
@@ -602,17 +526,8 @@ static struct platform_driver fbc_uio_share_driver = {
         .owner = THIS_MODULE,
         .of_match_table = of_match_ptr(fbc_uio_share_of_table),
     }
-/*↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ここまではsampleを流用 ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑*/};
+};
 
-/***************************************** for cpurtt driver ****************************************************/
-/**
- * 
- * 
- * 
- * @param[in]
- * @return: 
- */
-/* レジスタアドレスの取得 */
 static long drvPURTT_InitRegAddr(void)
 {
     int i;
@@ -632,6 +547,24 @@ static long drvPURTT_InitRegAddr(void)
         if(NULL == g_RegBaseSgir)
         {
             pr_err("failed to get SGIR address \n");
+            return -EFAULT;
+        }
+    }
+
+    if (NULL == g_RegBaseItargets11)
+    {
+        Resource = request_mem_region(DRV_CPURTTKER_ITARGETS_11, 4U, UDF_CPURTT_DRIVER_NAME);
+        if (NULL == Resource)
+        {
+            pr_err("failed to get GICD_ITARGETS11 resource\n");
+            return -ENOSPC;
+        }
+
+        g_RegBaseItargets11 = ioremap_nocache(DRV_CPURTTKER_ITARGETS_11, 4U);
+
+        if(NULL == g_RegBaseItargets11)
+        {
+            pr_err("failed to get GICD_ITARGETS11 address \n");
             return -EFAULT;
         }
     }
@@ -702,6 +635,10 @@ static void drvPURTT_DeInitRegAddr(void)
     release_mem_region(DRV_CPURTTKER_SGIR, 4U);
     g_RegBaseSgir = NULL;
 
+    iounmap(g_RegBaseItargets11);
+    release_mem_region(DRV_CPURTTKER_ITARGETS_11, 4U);
+    g_RegBaseItargets11 = NULL;
+
     iounmap(g_RegBaseRttfinish1);
     release_mem_region(DRV_RTTKER_RTTFINISH1, 4U);
     g_RegBaseRttfinish1 = NULL;
@@ -716,7 +653,6 @@ static void drvPURTT_DeInitRegAddr(void)
         release_mem_region(drvRTT_PhyRegAddr[i], 4U);
         g_RegBaseAddrTable[i] = NULL;
     }
-
 }
 
 /* enable FbistInterrupt */
@@ -726,6 +662,8 @@ static long drvCPURTT_EnableFbistInterrupt(struct fbc_uio_share_platform_data *p
     cpumask_t CpuMask;
     struct uio_info *uio_info = priv->uio_info;
     unsigned long flags;
+    volatile unsigned int reg_read_data;
+    unsigned int reg_excepted_data;
 
     spin_lock_irqsave(&priv->lock, flags);
     if (__test_and_clear_bit(UIO_IRQ_DISABLED, &priv->flags))
@@ -743,10 +681,18 @@ static long drvCPURTT_EnableFbistInterrupt(struct fbc_uio_share_platform_data *p
         return -EINVAL;
     }
 
+    /* internal bus interface check */
+    reg_excepted_data = ((unsigned int)((1U<<aAffinity)<<16U) & DRV_CPURTTKER_ITARGETS_11_MASK);
+    reg_read_data = readl(g_RegBaseItargets11);
+    if (reg_excepted_data != (reg_read_data & DRV_CPURTTKER_ITARGETS_11_MASK))
+    {
+        pr_err("gicd_targets11 buscheck error read_data = %08x excepted_dat = %08x\n", reg_read_data, reg_excepted_data);
+        return FBIST_BUSCHECK_ERROR;
+    }
+
     return ret;
 }
 
-/* A2 Runtime test core0用のカーネルスレッド */
 static int drvCPURTT_UDF_A2RuntimeThred0(void *aArg)
 {
     static uint16_t CpuNum;
@@ -754,7 +700,7 @@ static int drvCPURTT_UDF_A2RuntimeThred0(void *aArg)
     cpumask_t CpuMask;
     unsigned long BackupIrqMask;
 
-    CpuNum = *(uint16_t *)(aArg);
+    CpuNum = 0;
 
     /* set cpu affinity to current thread */
     cpumask_clear(&CpuMask);
@@ -764,15 +710,14 @@ static int drvCPURTT_UDF_A2RuntimeThred0(void *aArg)
    if(Ret < 0)
     {
         pr_err("KCPUTHREAD[%d] sched_setaffinity fail %ld\n", CpuNum, Ret);
-        do_exit(0);
+        complete_and_exit(&g_A2EndSynCompletion[CpuNum], Ret);
     }
 
     g_A2Task[CpuNum]->rt_priority = 1; /* max priority */
     g_A2Task[CpuNum]->policy = SCHED_RR; /* max policy */
 
     /* Notify the generator that the thread has started */
-    complete(&g_A2EndSynCompletion[CpuNum]);
-
+    complete(&g_A2ThWakeupCompletion[CpuNum]);
     do
     {
        /* Waiting for start request from user  */
@@ -782,6 +727,7 @@ static int drvCPURTT_UDF_A2RuntimeThred0(void *aArg)
         {
             /* On CPU0, interrupt mask and execute A2 Runtime Test  */
             BackupIrqMask = arch_local_irq_save();
+
             g_A2SmoniResult[CpuNum] = Smoni_RuntimeTestA2Execute(g_A2Param[CpuNum].Rttex, g_A2Param[CpuNum].Sgi);
             arch_local_irq_restore(BackupIrqMask);
 
@@ -791,7 +737,7 @@ static int drvCPURTT_UDF_A2RuntimeThred0(void *aArg)
         else
         {
             /* Exit if there is a thread termination request */
-            do_exit(0);
+            complete_and_exit(&g_A2EndSynCompletion[CpuNum], Ret);
         }
 
     }while(1);
@@ -799,14 +745,13 @@ static int drvCPURTT_UDF_A2RuntimeThred0(void *aArg)
     return 0;
 }
 
-/* A2 Runtime test core1用のカーネルスレッド */
 static int drvCPURTT_UDF_A2RuntimeThred1(void *aArg)
 {
     static uint16_t CpuNum;
     long Ret = 0;
     cpumask_t CpuMask;
 
-    CpuNum = *(uint32_t *)(aArg);
+    CpuNum = 1;
 
     cpumask_clear(&CpuMask);
     cpumask_set_cpu(CpuNum, &CpuMask);
@@ -815,15 +760,14 @@ static int drvCPURTT_UDF_A2RuntimeThred1(void *aArg)
     if(Ret < 0)
     {
         pr_err("KCPUTHREAD[%d] sched_setaffinity fail %ld\n", CpuNum, Ret);
-        do_exit(0);
+        complete_and_exit(&g_A2EndSynCompletion[CpuNum], Ret);
     }
 
     g_A2Task[CpuNum]->rt_priority = 1; /* max priority */
     g_A2Task[CpuNum]->policy = SCHED_RR; /* max policy */
 
     /* Notify the generator that the thread has started */
-    complete(&g_A2EndSynCompletion[CpuNum]);
-
+    complete(&g_A2ThWakeupCompletion[CpuNum]);
     do
     {
        /* Waiting for start request from user  */
@@ -831,30 +775,30 @@ static int drvCPURTT_UDF_A2RuntimeThred1(void *aArg)
 
         if (!g_TaskExitFlg)
         {
-            /* execute A2 Runtime Test  */
+            /* On CPU1, interrupt mask and execute A2 Runtime Test  */
+
             g_A2SmoniResult[CpuNum] = Smoni_RuntimeTestA2Execute(g_A2Param[CpuNum].Rttex, g_A2Param[CpuNum].Sgi);
+
            /* Notify that A2RuntimeTest is complete  */
             complete(&g_A2EndSynCompletion[CpuNum]);
         }
         else
         {
             /* Exit if there is a thread termination request */
-            do_exit(0);
+            complete_and_exit(&g_A2EndSynCompletion[CpuNum], Ret);
         }
 
     }while(1);
-
     return 0;
 }
 
-/* A2 Runtime test core2用のカーネルスレッド */
 static int drvCPURTT_UDF_A2RuntimeThred2(void *aArg)
 {
     static uint16_t CpuNum;
     long Ret = 0;
     cpumask_t CpuMask;
 
-    CpuNum = *(uint32_t *)(aArg);
+    CpuNum = 2;
 
     cpumask_clear(&CpuMask);
     cpumask_set_cpu(CpuNum, &CpuMask);
@@ -863,15 +807,14 @@ static int drvCPURTT_UDF_A2RuntimeThred2(void *aArg)
     if(Ret < 0)
     {
         pr_err("KCPUTHREAD[%d] sched_setaffinity fail %ld\n", CpuNum, Ret);
-        do_exit(0);
+        complete_and_exit(&g_A2EndSynCompletion[CpuNum], Ret);
     }
 
     g_A2Task[CpuNum]->rt_priority = 1; /* max priority */
     g_A2Task[CpuNum]->policy = SCHED_RR; /* max policy */
 
     /* Notify the generator that the thread has started */
-    complete(&g_A2EndSynCompletion[CpuNum]);
-
+    complete(&g_A2ThWakeupCompletion[CpuNum]);
     do
     {
        /* Waiting for start request from user  */
@@ -879,15 +822,16 @@ static int drvCPURTT_UDF_A2RuntimeThred2(void *aArg)
 
         if (!g_TaskExitFlg)
         {
-            /* execute A2 Runtime Test  */
+            /* On CPU2, interrupt mask and execute A2 Runtime Test  */
             g_A2SmoniResult[CpuNum] = Smoni_RuntimeTestA2Execute(g_A2Param[CpuNum].Rttex, g_A2Param[CpuNum].Sgi);
+
            /* Notify that A2RuntimeTest is complete  */
             complete(&g_A2EndSynCompletion[CpuNum]);
         }
         else
         {
             /* Exit if there is a thread termination request */
-            do_exit(0);
+            complete_and_exit(&g_A2EndSynCompletion[CpuNum], Ret);
         }
 
     }while(1);
@@ -895,14 +839,13 @@ static int drvCPURTT_UDF_A2RuntimeThred2(void *aArg)
     return 0;
 }
 
-/* A2 Runtime test core3用のカーネルスレッド */
 static int drvCPURTT_UDF_A2RuntimeThred3(void *aArg)
 {
     static uint16_t CpuNum;
     long Ret = 0;
     cpumask_t CpuMask;
 
-    CpuNum = *(uint32_t *)(aArg);
+    CpuNum = 3;
 
     cpumask_clear(&CpuMask);
     cpumask_set_cpu(CpuNum, &CpuMask);
@@ -911,14 +854,14 @@ static int drvCPURTT_UDF_A2RuntimeThred3(void *aArg)
     if(Ret < 0)
     {
         pr_err("KCPUTHREAD[%d] sched_setaffinity fail %ld\n", CpuNum, Ret);
-        do_exit(0);
+        complete_and_exit(&g_A2EndSynCompletion[CpuNum], Ret);
     }
 
     g_A2Task[CpuNum]->rt_priority = 1; /* max priority */
     g_A2Task[CpuNum]->policy = SCHED_RR; /* max policy */
 
     /* Notify the generator that the thread has started */
-    complete(&g_A2EndSynCompletion[CpuNum]);
+    complete(&g_A2ThWakeupCompletion[CpuNum]);
 
     do
     {
@@ -927,15 +870,16 @@ static int drvCPURTT_UDF_A2RuntimeThred3(void *aArg)
 
         if (!g_TaskExitFlg)
         {
-            /* execute A2 Runtime Test  */
+            /* On CPU3, interrupt mask and execute A2 Runtime Test  */
             g_A2SmoniResult[CpuNum] = Smoni_RuntimeTestA2Execute(g_A2Param[CpuNum].Rttex, g_A2Param[CpuNum].Sgi);
+
            /* Notify that A2RuntimeTest is complete  */
             complete(&g_A2EndSynCompletion[CpuNum]);
         }
         else
         {
             /* Exit if there is a thread termination request */
-            do_exit(0);
+            complete_and_exit(&g_A2EndSynCompletion[CpuNum], Ret);
         }
 
     }while(1);
@@ -947,36 +891,31 @@ static int drvCPURTT_UDF_A2RuntimeThred3(void *aArg)
 static long drvCPURTT_UDF_RuntimeTestInit(void)
 {
     long ret = 0;
-    uint32_t CpuNum;
     uint32_t CpuIndex;
     const A2ThreadTable A2ThreadTable[4] = {
                                       drvCPURTT_UDF_A2RuntimeThred0,
                                       drvCPURTT_UDF_A2RuntimeThred1,
                                       drvCPURTT_UDF_A2RuntimeThred2,
                                       drvCPURTT_UDF_A2RuntimeThred3};
-g_TaskExitFlg = 0;
-
-//if(g_A2Task[0] == NULL)
-//{
-    /* initalize for A2 RuntimeTest*/
-    init_completion(&g_A2StartSynCompletion);
-    sema_init(&A2SyncSem, 1);
-    init_waitqueue_head(&A2SyncWaitQue);
-//    g_TaskExitFlg = 0;
-
+    g_TaskExitFlg = 0;
+      /* initalize for A2 RuntimeTest*/
     for(CpuIndex=0; CpuIndex<DRV_CPURTTKER_CPUNUM_MAX; CpuIndex++)
     {
-        init_completion(&g_A2EndSynCompletion[CpuIndex]);
+        if(g_A2Task[CpuIndex] == NULL)
+        {
+            init_completion(&g_A2EndSynCompletion[CpuIndex]);
+            init_completion(&g_A2ThWakeupCompletion[CpuIndex]);
 
-        g_A2Task[CpuIndex] = kthread_run(A2ThreadTable[CpuIndex], &CpuIndex, "cpurtt_A2rtt_%d", CpuIndex);
-        if (IS_ERR(g_A2Task[CpuIndex]))
-        {  
-            pr_err("kthread_run[%d] failed", CpuIndex);
-            return -EINVAL;
+            g_A2Task[CpuIndex] = kthread_run(A2ThreadTable[CpuIndex], &CpuIndex, "cpurtt_A2rtt_%d", CpuIndex);
+            if (IS_ERR(g_A2Task[CpuIndex]))
+            {  
+                pr_err("A2_rtt_thread_run[%d] failed", CpuIndex);
+                return -EINVAL;
+            }
+            wait_for_completion(&g_A2ThWakeupCompletion[CpuIndex]);
         }
-        wait_for_completion(&g_A2EndSynCompletion[CpuIndex]); /* 指定したCPUのA2 Runtime Testスレッドが起動するまでスリープ */
     }
-//}
+
     return ret;
 }
 
@@ -984,9 +923,6 @@ g_TaskExitFlg = 0;
 static long drvCPURTT_UDF_RuntimeTestDeinit(void)
 {
     long ret = 0;
-
-    g_TaskExitFlg = 1;
-    complete_all(&g_A2StartSynCompletion);
 
     return ret;
 }
@@ -1008,8 +944,8 @@ static long drvCPURTT_UDF_SmoniApiExe(drvCPURTT_SmoniTable_t index, uint32_t aCp
     struct platform_device *pdev = g_cpurtt_pdev;
     struct fbc_uio_share_platform_data *priv = platform_get_drvdata(pdev);
     unsigned int IrqNum = (unsigned int)priv->uio_info->irq;
-
-volatile uint32_t CurrentCpuNum;
+    unsigned int reg_read_data;
+    unsigned int reg_excepted_data;
 
     if (!(0xFFFFFFF0 & aCpuId))
     {
@@ -1073,10 +1009,12 @@ volatile uint32_t CurrentCpuNum;
             {
                 if (aCpuId == 0)
                 {
+                    reg_excepted_data = DRV_CPURTTKER_ITARGETS_11_CPU1;
                     ret = (long)irq_set_affinity_hint(IrqNum, cpumask_of(1U));
                 }
                 else
                 {
+                    reg_excepted_data = DRV_CPURTTKER_ITARGETS_11_CPU0;
                     ret = (long)irq_set_affinity_hint(IrqNum, cpumask_of(0U));
                 }
                 if (ret != 0)
@@ -1085,9 +1023,18 @@ volatile uint32_t CurrentCpuNum;
                     break;
                 }
 
-                InterruptFlag = arch_local_irq_save(); /* 現在のCPUへの割り込みマスク */
+                 /* internal bus interface check */
+                 reg_read_data = readl(g_RegBaseItargets11);
+                 if (reg_excepted_data != (reg_read_data & DRV_CPURTTKER_ITARGETS_11_MASK))
+                 {
+                     pr_err("gicd_targets11 buscheck error read_data = %08x excepted_data = %08x\n", reg_read_data, reg_excepted_data);
+                     ret = FBIST_BUSCHECK_ERROR;
+                     break;
+                 }
+
+                InterruptFlag = arch_local_irq_save();
                 *aSmoniret = Smoni_RuntimeTestA1Execute(SmoniArgA1.Rttex);
-                arch_local_irq_restore(InterruptFlag); /* 現在のCPUへの割り込みマスク解除 */            
+                arch_local_irq_restore(InterruptFlag);
 
             }
             break;
@@ -1096,18 +1043,27 @@ volatile uint32_t CurrentCpuNum;
             ret = copy_from_user(&SmoniArgA2, (const void __user *)(aArg), sizeof(drvCPURTT_A2rttParam_t));
             if (ret == 0U)
             {
-                g_A2Param[aCpuId].Rttex = SmoniArgA2.Rttex;   /* A2 Runtime Test用パラメータを設定 */
-                g_A2Param[aCpuId].Sgi = SmoniArgA2.Sgi;     /* A2 Runtime Test用パラメータを設定 */
+                g_A2Param[aCpuId].Rttex = SmoniArgA2.Rttex;
+                g_A2Param[aCpuId].Sgi = SmoniArgA2.Sgi;
 
                 if (aCpuId == 0)
                 {
-
                     ret = (long)irq_set_affinity_hint(IrqNum, cpumask_of(0U));
                     if (ret != 0)
                     {
                         pr_err( "irq_set_affinity_hint failed %ld \n", ret);
                         break;
                     }
+
+                     /* internal bus interface check */
+                     reg_excepted_data = DRV_CPURTTKER_ITARGETS_11_CPU0;
+                     reg_read_data = readl(g_RegBaseItargets11);
+                     if (reg_excepted_data != (reg_read_data & DRV_CPURTTKER_ITARGETS_11_MASK))
+                     {
+                         pr_err("gicd_targets11 buscheck error read_data = %08x excepted_data = %08x\n", reg_read_data, reg_excepted_data);
+                         ret = FBIST_BUSCHECK_ERROR;
+                         break;
+                     }
 
                     /* Set a flag for synchronization with other CPUs */
                     down(&A2SyncSem); 
@@ -1119,7 +1075,10 @@ volatile uint32_t CurrentCpuNum;
                     wait_event(A2SyncWaitQue, (A2SYNC_ALL == (g_A2SyncWait & A2SYNC_ALL)));
 
                     /* A2 Runtime Test Execution thread start request  */
-                    complete_all(&g_A2StartSynCompletion);
+                    complete(&g_A2StartSynCompletion);
+                    complete(&g_A2StartSynCompletion);
+                    complete(&g_A2StartSynCompletion);
+                    complete(&g_A2StartSynCompletion);
                 }
                 else
                 {
@@ -1128,7 +1087,6 @@ volatile uint32_t CurrentCpuNum;
                     g_A2SyncWait |= A2SyncInfoTable[aCpuId];
                     wake_up(&A2SyncWaitQue);
                     up(&A2SyncSem);
-
                 }
                 /* Wait until A2 Runtime Test completion notification is received from the A2 Runtime Test execution thread corresponding to CpuId  */
                 wait_for_completion(&g_A2EndSynCompletion[aCpuId]);
@@ -1139,7 +1097,7 @@ volatile uint32_t CurrentCpuNum;
                 g_A2SyncWait &= ~A2SyncInfoTable[aCpuId];
                 up(&A2SyncSem);
            }
-            break;
+           break;
 
         case DRV_CPURTT_SMONIAPI_FBAWRITE:
 
@@ -1147,7 +1105,6 @@ volatile uint32_t CurrentCpuNum;
             ret = copy_from_user(&SmoniArgFwrite, (const void __user *)(aArg), sizeof(drvCPURTT_FbaWriteParam_t));
             if (ret == 0U)
             {
-
                 /* Copy the access destination address data to kernel memory.  */
                 ret = copy_from_user(&g_SmoniAddrBuf[aCpuId][0], (const void __user *)SmoniArgFwrite.AddrBuf, (SmoniArgFwrite.RegCount * sizeof(uint32_t)));
                 if (ret == 0U)
@@ -1193,7 +1150,7 @@ volatile uint32_t CurrentCpuNum;
             break;
 
         default:
-            ret = -1;
+            ret = -EINVAL;
             break;
     }
 
@@ -1207,34 +1164,36 @@ static long drvCPURTT_UDF_FbistInit(void)
     struct fbc_uio_share_platform_data *priv = platform_get_drvdata(pdev);
 
     ret = pm_runtime_get_sync(&priv->pdev->dev);
-
     ret = fbc_uio_share_clk_enable(priv);
-    if(ret)
-        goto fbist_init_err;
-
-    /* enabeled fbist finish interrupt with set interrupt affinity */
-    ret = drvCPURTT_EnableFbistInterrupt(priv, DRV_RTTKER_FIELD_BIST_INT_CPU);
-    if (ret < 0)
+    if (ret != 0)
     {
-        goto fbist_init_err;
+        pm_runtime_put_sync(&priv->pdev->dev);
+        return ret;
     }
 
     /* get resource for fba and fbc regster address */
     ret = drvPURTT_InitRegAddr();
     if (ret < 0)
     {
-        goto fbist_init_err;
+        pm_runtime_put_sync(&priv->pdev->dev);
+        return ret;
+    }
+
+    /* enabeled fbist finish interrupt with set interrupt affinity */
+    ret = drvCPURTT_EnableFbistInterrupt(priv, DRV_RTTKER_FIELD_BIST_INT_CPU);
+    if (ret != 0)
+    {
+        pm_runtime_put_sync(&priv->pdev->dev);
+        return ret;
     }
 
     /* iInitialization of parameters related to callback execution request  */
-    sema_init(&CallbackSem, 0);
     FbistCloseReq = false;
     g_CallbackInfo.head = 0;
     g_CallbackInfo.pos = 0;
     g_CallbackInfo.status = CB_QUEUE_STATUS_EMPTY;
 
-fbist_init_err:
-    ret = pm_runtime_put_sync(&priv->pdev->dev);
+    pm_runtime_put_sync(&priv->pdev->dev);
 
     return ret;
 }
@@ -1245,23 +1204,23 @@ static long drvCPURTT_UDF_FbistDeInit(void)
     struct platform_device *pdev = g_cpurtt_pdev;
     struct fbc_uio_share_platform_data *priv = platform_get_drvdata(pdev);
     struct uio_info *uio_info = priv->uio_info;
-    unsigned long flags;
 
     fbc_uio_share_clk_disable(priv);
     pm_runtime_put_sync(&priv->pdev->dev);
 
-    spin_lock_irqsave(&priv->lock, flags);
+    spin_lock(&priv->lock);
     if (!__test_and_set_bit(UIO_IRQ_DISABLED, &priv->flags))
     {
+        irq_set_affinity_hint((unsigned int)uio_info->irq, NULL);
         disable_irq((unsigned int)uio_info->irq);
     }
-    spin_unlock_irqrestore(&priv->lock, flags);
+    spin_unlock(&priv->lock);
 
     drvPURTT_DeInitRegAddr();
 
     /* Release of semaphore waiting for callback notification  */
-    up(&CallbackSem);
     FbistCloseReq = true;
+    up(&CallbackSem);
 
     return ret;
 
@@ -1287,7 +1246,6 @@ static long drvCPURTT_UDF_WaitCbNotice(drvCPURTT_CallbackInfo_t *aParam)
         else
         {
             g_CallbackInfo.status = CB_QUEUE_STATUS_EMPTY;
-
         }
     }
     else
@@ -1302,16 +1260,12 @@ static long drvCPURTT_UDF_WaitCbNotice(drvCPURTT_CallbackInfo_t *aParam)
 /* This function executes the purttmod open system call.  */
 static int CpurttDrv_open(struct inode *inode, struct file *file)
 {
-//    printk("cpurttmod open\n");
-
     return 0;
 }
 
 /* This function executes the purttmod close system call.  */
 static int CpurttDrv_close(struct inode *inode, struct file *file)
 {
-//    printk("cpurttmod close\n");
-
     return 0;
 }
 
@@ -1334,7 +1288,6 @@ static long CpurttDrv_ioctl( struct file* filp, unsigned int cmd, unsigned long 
             /* Copy smoni api arguments to kernel memory. */            
             ret = copy_from_user(&smoni_param, (void __user *)arg, sizeof(drvCPURTT_SmoniParam_t));
             if (ret != 0) {
-                printk("copy_from_user error = %ld", ret);
                 ret = -EFAULT;
             }
             
@@ -1401,14 +1354,14 @@ static int CpurttDrv_init(void)
 {
     int ret = 0;
     struct device *dev;
-int cnt=0;
+    unsigned int cnt;
 
     /* register character device for cpurttdrv */
     cpurtt_major = register_chrdev(cpurtt_major, UDF_CPURTT_DRIVER_NAME, &s_CpurttDrv_fops);
     if (cpurtt_major < 0)
     {
         pr_err( "register_chrdev = %d\n", cpurtt_major);
-        goto cpurttdrv_initend;
+        return -EFAULT;
     }
 
     /* create class module */
@@ -1419,7 +1372,7 @@ int cnt=0;
         ret = PTR_ERR(cpurtt_class);
         unregister_chrdev(cpurtt_major, UDF_CPURTT_DRIVER_NAME);
         pr_err( "class_create = %d\n", ret);
-        goto cpurttdrv_initend;
+        return ret;
     }
 
     /* create device file for cpurttdrv */
@@ -1431,7 +1384,7 @@ int cnt=0;
         unregister_chrdev(cpurtt_major, UDF_CPURTT_DRIVER_NAME);
         pr_err("cpurttmod: unable to create device cpurttmod%d\n", MINOR(MKDEV(cpurtt_major, 0)));
         ret = PTR_ERR(dev);
-        goto cpurttdrv_initend;
+        return ret;
     }
 
     platform_driver_register(&fbc_uio_share_driver);
@@ -1444,8 +1397,15 @@ int cnt=0;
         return -EINVAL;
     }
 
-cpurttdrv_initend:
-    dev_notice(dev, "CpurttDrv start result = %d\n", ret);
+    init_completion(&g_A2StartSynCompletion);
+    sema_init(&A2SyncSem, 1);
+    init_waitqueue_head(&A2SyncWaitQue);
+    sema_init(&CallbackSem, 0);
+
+    for(cnt=0;cnt<4;cnt++)
+    {
+        g_A2Task[cnt] = NULL;
+    }
 
     return ret;
 }
@@ -1453,9 +1413,22 @@ cpurttdrv_initend:
 /* This function is executed when cpurttmod is unloaded and frees cpurttmod resources.  */
 static void CpurttDrv_exit(void)
 {
+    unsigned int cnt;
 
-//    g_TaskExitFlg = 1;
-//    complete_all(&g_A2StartSynCompletion);
+    /* release cpurtt thread for A2 Runtime Test*/
+    g_TaskExitFlg = 1;
+    complete_all(&g_A2StartSynCompletion);
+    for(cnt=0;cnt<4;cnt++)
+    {
+        if(g_A2Task[cnt]!=NULL)
+        {
+            wait_for_completion(&g_A2EndSynCompletion[cnt]);
+            g_A2Task[cnt] = NULL;
+        }
+    }
+
+    /* unload fbc uio_chare driver */
+    platform_driver_unregister(&fbc_uio_share_driver);
 
     /* release device clase */
     device_destroy(cpurtt_class, MKDEV(cpurtt_major, 0));
@@ -1463,13 +1436,11 @@ static void CpurttDrv_exit(void)
 
     /* unload character device */
     unregister_chrdev(cpurtt_major, "UDF_CPURTT_DRIVER_NAME");
-
-    /* unload fbc uio_chare driver */
-    platform_driver_unregister(&fbc_uio_share_driver);
-
-    printk("CpurttDrv exit\n");
 }
 
 module_init(CpurttDrv_init);
 module_exit(CpurttDrv_exit);
 
+MODULE_AUTHOR("RenesasElectronicsCorp.");
+MODULE_DESCRIPTION("CPURTT drive");
+MODULE_LICENSE("GPL v2");

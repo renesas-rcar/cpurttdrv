@@ -1,15 +1,32 @@
+/****************************************************************************/
 /*
- * cpurttdrv.h
- *
- *  Created on: 2020/11/19
+ * FILE          : cpurttdrv.h
+ * DESCRIPTION   : CPU Runtime Test driver for sample code
+ * CREATED       : 2021.04.17
+ * MODIFIED      : -
+ * AUTHOR        : Renesas Electronics Corporation
+ * TARGET DEVICE : R-Car V3H
+ * TARGET OS     : BareMetal
+ * HISTORY       : -
  */
-
-#include "cpurtt_common.h"
+/****************************************************************************/
+/*
+ * Copyright(C) 2021 Renesas Electronics Corporation. All Rights Reserved.
+ * RENESAS ELECTRONICS CONFIDENTIAL AND PROPRIETARY
+ * This program must be used solely for the purpose for which
+ * it was furnished by Renesas Electronics Corporation.
+ * No part of this program may be reproduced or disclosed to
+ * others, in any form, without the prior written permission
+ * of Renesas Electronics Corporation.
+ *
+ ****************************************************************************/
 
 #ifndef CPURTTDRV_H
 #define CPURTTDRV_H
 
-#define DRIVER_NAME "sample_uio_share"
+#include "cpurtt_common.h"
+
+#define UDF_CPURTT_UIO_DRIVER_NAME    "fbc_uio_share"     /* cpurtt driver name for uio */
 
 #define DRV_CPURTTKER_CPUNUM_MAX 4U
 #define DRV_CPURTTKER_SMONI_BUF_SIZE 128U
@@ -94,8 +111,17 @@
 #define DRV_CPURTTKER_SGI_HIERARCHY532 0x00040004U
 #define DRV_CPURTTKER_SGI_HIERARCHY533 0x00080004U
 
-#define DRV_RTTKER_FIELD_BIST_INT_CPU 0xFU
-#define FBIST_CB_CLOSE_REQ 1U;
+#define DRV_CPURTTKER_ITARGETS_11      0xF101082CU
+#define DRV_CPURTTKER_ITARGETS_11_MASK 0x00FF0000U
+#define DRV_CPURTTKER_ITARGETS_11_CPU0 0x00010000U
+#define DRV_CPURTTKER_ITARGETS_11_CPU1 0x00020000U
+
+#define DRV_RTTKER_FIELD_BIST_INT_CPU 0x01U
+#define DRV_RTTKER_AFFINITY_MASK_BIT 0x01U
+
+/* return code */
+#define FBIST_CB_CLOSE_REQ 1
+#define FBIST_BUSCHECK_ERROR 2
 
 /* A2 RuntimeTest Defined value for synchronization management  */
 #define A2SYNC_CPU0_BIT 0x0001
@@ -245,8 +271,8 @@ struct fbc_uio_share_platform_data {
 	void __iomem *base_addr[1];
 	struct clk *clks[3];
 	int clk_count;
-    spinlock_t lock; // add
-    unsigned long flags;  // add
+    spinlock_t lock;
+    unsigned long flags;
 };
 
 enum {
@@ -254,4 +280,3 @@ enum {
 };
 
 #endif
-
