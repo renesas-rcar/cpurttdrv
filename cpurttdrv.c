@@ -2,7 +2,7 @@
 /*
  * FILE          : cpurttdrv.c
  * DESCRIPTION   : CPU Runtime Test driver for sample code
- * CREATED       : 2021.04.17
+ * CREATED       : 2021.04.20
  * MODIFIED      : -
  * AUTHOR        : Renesas Electronics Corporation
  * TARGET DEVICE : R-Car V3H
@@ -79,7 +79,6 @@ static unsigned int cpurtt_major = 0;        /*  0:auto */
 static struct class *cpurtt_class = NULL;
 
 /* Variables used unique to cpurttmod */
-static drvCPURTT_SmoniParam_t smoni_param;
 static uint32_t g_SmoniAddrBuf[DRV_CPURTTKER_CPUNUM_MAX][DRV_CPURTTKER_SMONI_BUF_SIZE]; /* address buffer for parameter of Smoni_RuntimeTestFbaWrite/Smoni_RuntimeTestFbaRead */
 static uint32_t g_SmoniDataBuf[DRV_CPURTTKER_CPUNUM_MAX][DRV_CPURTTKER_SMONI_BUF_SIZE]; /* data buffer for parameter of Smoni_RuntimeTestFbaWrite/Smoni_RuntimeTestFbaRead */
 static struct completion g_A2StartSynCompletion;
@@ -776,7 +775,6 @@ static int drvCPURTT_UDF_A2RuntimeThred1(void *aArg)
         if (!g_TaskExitFlg)
         {
             /* On CPU1, interrupt mask and execute A2 Runtime Test  */
-
             g_A2SmoniResult[CpuNum] = Smoni_RuntimeTestA2Execute(g_A2Param[CpuNum].Rttex, g_A2Param[CpuNum].Sgi);
 
            /* Notify that A2RuntimeTest is complete  */
@@ -1229,8 +1227,19 @@ static long drvCPURTT_UDF_FbistDeInit(void)
 static long drvCPURTT_UDF_WaitCbNotice(drvCPURTT_CallbackInfo_t *aParam)
 {
     long      ret = 0;
+    struct platform_device *pdev = g_cpurtt_pdev;
+    struct fbc_uio_share_platform_data *priv = platform_get_drvdata(pdev);
+    struct uio_info *uio_info = priv->uio_info;
+    unsigned long flags;
 
     down(&CallbackSem); /* wait for semaphore release */
+
+    spin_lock(&priv->lock);
+    if (!__test_and_set_bit(UIO_IRQ_DISABLED, &priv->flags))
+    {
+        disable_irq((unsigned int)uio_info->irq);
+    }
+    spin_unlock(&priv->lock);
 
     if (FbistCloseReq == false)
     {
@@ -1254,6 +1263,13 @@ static long drvCPURTT_UDF_WaitCbNotice(drvCPURTT_CallbackInfo_t *aParam)
         ret = FBIST_CB_CLOSE_REQ;
     }
 
+    spin_lock_irqsave(&priv->lock, flags);
+    if (__test_and_clear_bit(UIO_IRQ_DISABLED, &priv->flags))
+    {
+        enable_irq((unsigned int)uio_info->irq);
+    }
+    spin_unlock_irqrestore(&priv->lock, flags);
+
     return ret;
 }
 
@@ -1274,6 +1290,7 @@ static long CpurttDrv_ioctl( struct file* filp, unsigned int cmd, unsigned long 
 {
     long ret;
     static drvCPURTT_CallbackInfo_t CbInfo;
+    static drvCPURTT_SmoniParam_t smoni_param;
 
     switch (cmd) {
         case DRV_CPURTT_IOCTL_DEVINIT:
