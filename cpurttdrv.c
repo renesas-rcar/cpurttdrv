@@ -3,11 +3,13 @@
  * FILE          : cpurttdrv.c
  * DESCRIPTION   : CPU Runtime Test driver for sample code
  * CREATED       : 2021.04.20
- * MODIFIED      : -
+ * MODIFIED      : 2021.05.31
  * AUTHOR        : Renesas Electronics Corporation
- * TARGET DEVICE : R-Car V3H
+ * TARGET DEVICE : R-Car V3Hv2
  * TARGET OS     : BareMetal
- * HISTORY       : -
+ * HISTORY       : 
+ *                 2021.05.31 
+ *                            Modify so that ioctl arguments can be held correctly when multiple ioctls are executed.
  */
 /****************************************************************************/
 /*
@@ -56,7 +58,7 @@
 
 #undef IS_INTERRUPT
 
-#define DRIVER_VERSION "0.2"
+#define DRIVER_VERSION "0.3"
 
 /***********************************************************
  Macro definitions
@@ -85,7 +87,7 @@ static struct completion g_A2StartSynCompletion;
 static struct completion g_A2EndSynCompletion[DRV_CPURTTKER_CPUNUM_MAX];
 static struct completion g_A2ThWakeupCompletion[DRV_CPURTTKER_CPUNUM_MAX];
 
-volatile uint16_t g_A2SmoniResult[DRV_CPURTTKER_CPUNUM_MAX];
+static uint16_t g_A2SmoniResult[DRV_CPURTTKER_CPUNUM_MAX];
 static drvCPURTT_A2rttParam_t g_A2Param[DRV_CPURTTKER_CPUNUM_MAX];
 
 static struct task_struct *g_A2Task[DRV_CPURTTKER_CPUNUM_MAX];
@@ -95,7 +97,7 @@ static wait_queue_head_t A2SyncWaitQue;
 volatile static uint16_t g_A2SyncWait = 0;
 static struct semaphore A2SyncSem;
 
-static uint16_t A2SyncInfoTable[DRV_CPURTTKER_CPUNUM_MAX] = 
+static const uint16_t A2SyncInfoTable[DRV_CPURTTKER_CPUNUM_MAX] = 
 {
     A2SYNC_CPU0_BIT,
     A2SYNC_CPU1_BIT,
@@ -227,7 +229,7 @@ static void fbc_uio_share_clk_disable(struct fbc_uio_share_platform_data *pdata)
         clk_disable_unprepare(pdata->clks[i]);
 }
 
-static irqreturn_t fbc_uio_share_irq_handler(int irq, struct uio_info *uio_info)
+static void FbistInterruptHandler(int irq, struct uio_info *uio_info)
 {
     uint32_t RegVal_fin1;
     uint32_t RegVal_fin2;
@@ -362,6 +364,11 @@ static irqreturn_t fbc_uio_share_irq_handler(int irq, struct uio_info *uio_info)
 
     /* release semafore for execute callback to the user layer */
     up(&CallbackSem);
+}
+
+static irqreturn_t fbc_uio_share_irq_handler(int irq, struct uio_info *uio_info)
+{
+    FbistInterruptHandler(irq, uio_info);
 
     return IRQ_HANDLED;
 }
@@ -527,7 +534,7 @@ static struct platform_driver fbc_uio_share_driver = {
     }
 };
 
-static long drvPURTT_InitRegAddr(void)
+static long drvCPURTT_InitRegAddr(void)
 {
     int i;
     struct resource *Resource;
@@ -625,7 +632,7 @@ static long drvPURTT_InitRegAddr(void)
     return 0;
 }
 
-static void drvPURTT_DeInitRegAddr(void)
+static void drvCPURTT_DeInitRegAddr(void)
 {
     uint32_t i;
 
@@ -694,7 +701,7 @@ static long drvCPURTT_EnableFbistInterrupt(struct fbc_uio_share_platform_data *p
 
 static int drvCPURTT_UDF_A2RuntimeThred0(void *aArg)
 {
-    static uint16_t CpuNum;
+    uint16_t CpuNum;
     long Ret = 0;
     cpumask_t CpuMask;
     unsigned long BackupIrqMask;
@@ -719,8 +726,13 @@ static int drvCPURTT_UDF_A2RuntimeThred0(void *aArg)
     complete(&g_A2ThWakeupCompletion[CpuNum]);
     do
     {
-       /* Waiting for start request from user  */
-        wait_for_completion(&g_A2StartSynCompletion);
+        /* Waiting for start request from user  */
+        Ret = wait_for_completion_interruptible(&g_A2StartSynCompletion);
+        if (0 != Ret)
+        {
+            pr_err(" CPU%d kthread wait completion error = %ld\n",CpuNum, Ret);
+            g_TaskExitFlg = true;
+        }
 
         if (!g_TaskExitFlg)
         {
@@ -746,7 +758,7 @@ static int drvCPURTT_UDF_A2RuntimeThred0(void *aArg)
 
 static int drvCPURTT_UDF_A2RuntimeThred1(void *aArg)
 {
-    static uint16_t CpuNum;
+    uint16_t CpuNum;
     long Ret = 0;
     cpumask_t CpuMask;
 
@@ -769,8 +781,13 @@ static int drvCPURTT_UDF_A2RuntimeThred1(void *aArg)
     complete(&g_A2ThWakeupCompletion[CpuNum]);
     do
     {
-       /* Waiting for start request from user  */
-        wait_for_completion(&g_A2StartSynCompletion);
+        /* Waiting for start request from user  */
+        Ret = wait_for_completion_interruptible(&g_A2StartSynCompletion);
+        if (0 != Ret)
+        {
+            pr_err(" CPU%d kthread wait completion error = %ld\n",CpuNum, Ret);
+            g_TaskExitFlg = true;
+        }
 
         if (!g_TaskExitFlg)
         {
@@ -787,12 +804,13 @@ static int drvCPURTT_UDF_A2RuntimeThred1(void *aArg)
         }
 
     }while(1);
+
     return 0;
 }
 
 static int drvCPURTT_UDF_A2RuntimeThred2(void *aArg)
 {
-    static uint16_t CpuNum;
+    uint16_t CpuNum;
     long Ret = 0;
     cpumask_t CpuMask;
 
@@ -815,8 +833,13 @@ static int drvCPURTT_UDF_A2RuntimeThred2(void *aArg)
     complete(&g_A2ThWakeupCompletion[CpuNum]);
     do
     {
-       /* Waiting for start request from user  */
-        wait_for_completion(&g_A2StartSynCompletion);
+        /* Waiting for start request from user  */
+        Ret = wait_for_completion_interruptible(&g_A2StartSynCompletion);
+        if (0 != Ret)
+        {
+            pr_err(" CPU%d kthread wait completion error = %ld\n",CpuNum, Ret);
+            g_TaskExitFlg = true;
+        }
 
         if (!g_TaskExitFlg)
         {
@@ -839,7 +862,7 @@ static int drvCPURTT_UDF_A2RuntimeThred2(void *aArg)
 
 static int drvCPURTT_UDF_A2RuntimeThred3(void *aArg)
 {
-    static uint16_t CpuNum;
+    uint16_t CpuNum;
     long Ret = 0;
     cpumask_t CpuMask;
 
@@ -863,8 +886,13 @@ static int drvCPURTT_UDF_A2RuntimeThred3(void *aArg)
 
     do
     {
-       /* Waiting for start request from user  */
-        wait_for_completion(&g_A2StartSynCompletion);
+        /* Waiting for start request from user  */
+        Ret = wait_for_completion_interruptible(&g_A2StartSynCompletion);
+        if (0 != Ret)
+        {
+            pr_err(" CPU%d kthread wait completion error = %ld\n",CpuNum, Ret);
+            g_TaskExitFlg = true;
+        }
 
         if (!g_TaskExitFlg)
         {
@@ -910,7 +938,13 @@ static long drvCPURTT_UDF_RuntimeTestInit(void)
                 pr_err("A2_rtt_thread_run[%d] failed", CpuIndex);
                 return -EINVAL;
             }
-            wait_for_completion(&g_A2ThWakeupCompletion[CpuIndex]);
+
+            ret = wait_for_completion_interruptible(&g_A2ThWakeupCompletion[CpuIndex]);
+            if (0 != ret)
+            {
+                pr_err("CPU%d kthread creat err = %ld\n",CpuIndex, ret);
+                break;
+            }
         }
     }
 
@@ -1064,13 +1098,23 @@ static long drvCPURTT_UDF_SmoniApiExe(drvCPURTT_SmoniTable_t index, uint32_t aCp
                      }
 
                     /* Set a flag for synchronization with other CPUs */
-                    down(&A2SyncSem); 
+                    ret = down_interruptible(&A2SyncSem);
+                    if(ret != 0)
+                    {
+                        pr_err(" CPU%d A2SyncSem error = %ld\n",aCpuId, ret);
+                        break;
+                    }
                     g_A2SyncWait |= A2SyncInfoTable[aCpuId];
                     wake_up(&A2SyncWaitQue);
                     up(&A2SyncSem);
 
                     /* Wait until all CPU sync wait flags are updated  */
-                    wait_event(A2SyncWaitQue, (A2SYNC_ALL == (g_A2SyncWait & A2SYNC_ALL)));
+                    ret = wait_event_interruptible(A2SyncWaitQue, (A2SYNC_ALL == (g_A2SyncWait & A2SYNC_ALL)));
+                    if (ret != 0)
+                    {
+                        pr_err("wait_evnet error = %ld\n",ret);
+                        break;
+                    }
 
                     /* A2 Runtime Test Execution thread start request  */
                     complete(&g_A2StartSynCompletion);
@@ -1081,17 +1125,32 @@ static long drvCPURTT_UDF_SmoniApiExe(drvCPURTT_SmoniTable_t index, uint32_t aCp
                 else
                 {
                     /* Set a flag for synchronization with other CPUs */
-                    down(&A2SyncSem);
+                    ret = down_interruptible(&A2SyncSem);
+                    if(ret != 0)
+                    {
+                        pr_err(" CPU%d A2SyncSem error = %ld\n",aCpuId, ret);
+                        break;
+                    }
                     g_A2SyncWait |= A2SyncInfoTable[aCpuId];
                     wake_up(&A2SyncWaitQue);
                     up(&A2SyncSem);
                 }
                 /* Wait until A2 Runtime Test completion notification is received from the A2 Runtime Test execution thread corresponding to CpuId  */
-                wait_for_completion(&g_A2EndSynCompletion[aCpuId]);
+                ret = wait_for_completion_interruptible(&g_A2EndSynCompletion[aCpuId]);
+                if (ret != 0)
+                {
+                    pr_err(" CPU%d wait completion error = %ld\n",aCpuId, ret);
+                    break;
+                }
 
                 *aSmoniret = g_A2SmoniResult[aCpuId]; 
 
-                down(&A2SyncSem);
+                ret = down_interruptible(&A2SyncSem);
+                if(ret != 0)
+                {
+                    pr_err(" CPU%d A2SyncSem error = %ld\n",aCpuId, ret);
+                    break;
+                }
                 g_A2SyncWait &= ~A2SyncInfoTable[aCpuId];
                 up(&A2SyncSem);
            }
@@ -1170,7 +1229,7 @@ static long drvCPURTT_UDF_FbistInit(void)
     }
 
     /* get resource for fba and fbc regster address */
-    ret = drvPURTT_InitRegAddr();
+    ret = drvCPURTT_InitRegAddr();
     if (ret < 0)
     {
         pm_runtime_put_sync(&priv->pdev->dev);
@@ -1214,7 +1273,7 @@ static long drvCPURTT_UDF_FbistDeInit(void)
     }
     spin_unlock(&priv->lock);
 
-    drvPURTT_DeInitRegAddr();
+    drvCPURTT_DeInitRegAddr();
 
     /* Release of semaphore waiting for callback notification  */
     FbistCloseReq = true;
@@ -1231,44 +1290,52 @@ static long drvCPURTT_UDF_WaitCbNotice(drvCPURTT_CallbackInfo_t *aParam)
     struct fbc_uio_share_platform_data *priv = platform_get_drvdata(pdev);
     struct uio_info *uio_info = priv->uio_info;
     unsigned long flags;
+    int      intret = 0;
 
-    down(&CallbackSem); /* wait for semaphore release */
+    intret = down_interruptible(&CallbackSem); /* wait for semaphore release */
 
-    spin_lock(&priv->lock);
-    if (!__test_and_set_bit(UIO_IRQ_DISABLED, &priv->flags))
+    if(!intret)
     {
-        disable_irq((unsigned int)uio_info->irq);
-    }
-    spin_unlock(&priv->lock);
-
-    if (FbistCloseReq == false)
-    {
-        if (g_CallbackInfo.pos > 0)
+        spin_lock(&priv->lock);
+        if (!__test_and_set_bit(UIO_IRQ_DISABLED, &priv->flags))
         {
-            aParam->FbistCbRequest = g_CallbackInfo.CbInfo[g_CallbackInfo.head].FbistCbRequest;
-            aParam->BusCheckCbRequest = g_CallbackInfo.CbInfo[g_CallbackInfo.head].BusCheckCbRequest;
-            aParam->RfsoOutputPinRequest = g_CallbackInfo.CbInfo[g_CallbackInfo.head].RfsoOutputPinRequest;
-            g_CallbackInfo.head = (uint8_t)((g_CallbackInfo.head + 1U) % DRV_RTTKER_HIERARCHY_MAX);
-            g_CallbackInfo.pos--;
-            g_CallbackInfo.status = CB_QUEUE_STATUS_ENA;
+            disable_irq((unsigned int)uio_info->irq);
+        }
+        spin_unlock(&priv->lock);
+        if (FbistCloseReq == false)
+        {
+            if (g_CallbackInfo.pos > 0)
+            {
+                aParam->FbistCbRequest = g_CallbackInfo.CbInfo[g_CallbackInfo.head].FbistCbRequest;
+                aParam->BusCheckCbRequest = g_CallbackInfo.CbInfo[g_CallbackInfo.head].BusCheckCbRequest;
+                aParam->RfsoOutputPinRequest = g_CallbackInfo.CbInfo[g_CallbackInfo.head].RfsoOutputPinRequest;
+                g_CallbackInfo.head = (uint8_t)((g_CallbackInfo.head + 1U) % DRV_RTTKER_HIERARCHY_MAX);
+                g_CallbackInfo.pos--;
+                g_CallbackInfo.status = CB_QUEUE_STATUS_ENA;
+            }
+            else
+            {
+                g_CallbackInfo.status = CB_QUEUE_STATUS_EMPTY;
+            }
         }
         else
         {
             g_CallbackInfo.status = CB_QUEUE_STATUS_EMPTY;
+            ret = FBIST_CB_CLOSE_REQ;
         }
+
+        spin_lock_irqsave(&priv->lock, flags);
+        if (__test_and_clear_bit(UIO_IRQ_DISABLED, &priv->flags))
+        {
+            enable_irq((unsigned int)uio_info->irq);
+        }
+        spin_unlock_irqrestore(&priv->lock, flags);
     }
     else
     {
-        g_CallbackInfo.status = CB_QUEUE_STATUS_EMPTY;
-        ret = FBIST_CB_CLOSE_REQ;
+        pr_err("wait callback err = %d\n",intret);
+        ret = (long)intret;
     }
-
-    spin_lock_irqsave(&priv->lock, flags);
-    if (__test_and_clear_bit(UIO_IRQ_DISABLED, &priv->flags))
-    {
-        enable_irq((unsigned int)uio_info->irq);
-    }
-    spin_unlock_irqrestore(&priv->lock, flags);
 
     return ret;
 }
@@ -1285,13 +1352,14 @@ static int CpurttDrv_close(struct inode *inode, struct file *file)
     return 0;
 }
 
-/* This function executes the purttmod ioctl system call.  */
+/* This function executes the cpurttmod ioctl system call.  */
 static long CpurttDrv_ioctl( struct file* filp, unsigned int cmd, unsigned long arg )
 {
     long ret;
-    static drvCPURTT_CallbackInfo_t CbInfo;
-    static drvCPURTT_SmoniParam_t smoni_param;
+    drvCPURTT_CallbackInfo_t CbInfo;
+    drvCPURTT_SmoniParam_t smoni_param;
 
+    /* Executes the process corresponding to the command specified in the argument "cmd" passed by ioctl execution from the user layer. */
     switch (cmd) {
         case DRV_CPURTT_IOCTL_DEVINIT:
             ret = drvCPURTT_UDF_RuntimeTestInit();
@@ -1301,7 +1369,7 @@ static long CpurttDrv_ioctl( struct file* filp, unsigned int cmd, unsigned long 
             ret = drvCPURTT_UDF_RuntimeTestDeinit();
             break;
 
-        case DRV_CPURTT_IOCTL_SMONI:       /* smoni api execute command */
+        case DRV_CPURTT_IOCTL_SMONI:
             /* Copy smoni api arguments to kernel memory. */            
             ret = copy_from_user(&smoni_param, (void __user *)arg, sizeof(drvCPURTT_SmoniParam_t));
             if (ret != 0) {
@@ -1439,7 +1507,7 @@ static void CpurttDrv_exit(void)
     {
         if(g_A2Task[cnt]!=NULL)
         {
-            wait_for_completion(&g_A2EndSynCompletion[cnt]);
+            (void)wait_for_completion_interruptible(&g_A2EndSynCompletion[cnt]);
             g_A2Task[cnt] = NULL;
         }
     }

@@ -5,7 +5,7 @@
  * CREATED       : 2021.02.15
  * MODIFIED      : 2021.04.15
  * AUTHOR        : Renesas Electronics Corporation
- * TARGET DEVICE : R-Car V3H
+ * TARGET DEVICE : R-Car V3Hv2
  * TARGET OS     : BareMetal
  * HISTORY       :
  *                 2021.02.15 Create New File corresponding to BareMetal
@@ -98,20 +98,23 @@ typedef struct {
     uint32_t RfsoOutputPinRequest;
 } drvCPURTT_CallbackInfo_t;
 
+/* Command definition for ioctl */
 #define DRV_CPURTT_IOCTL_MAGIC  (0x9AU)
 #define DRV_CPURTT_CMD_CODE     (0x1000U)
 
-#define DRV_CPURTT_IOCTL_DEVINIT    _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE )
-#define DRV_CPURTT_IOCTL_DEVDEINIT  _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 1 )
-#define DRV_CPURTT_IOCTL_SMONI      _IOWR( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 2, drvCPURTT_SmoniParam_t )
-#define DRV_CPURTT_IOCTL_DEVFBISTINIT    _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 3 )
-#define DRV_CPURTT_IOCTL_DEVFBISTDEINIT  _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 4 )
-#define DRV_CPURTT_IOCTL_WAIT_CALLBACK  _IOWR( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 5 , drvCPURTT_CallbackInfo_t)
+#define DRV_CPURTT_IOCTL_DEVINIT    _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE )                                      /* ioctl command for drvCPURTT_UDF_DrvInitialize */
+#define DRV_CPURTT_IOCTL_DEVDEINIT  _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 1 )                                  /* ioctl command for drvCPURTT_UDF_DrvDeInitialize */
+#define DRV_CPURTT_IOCTL_SMONI      _IOWR( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 2, drvCPURTT_SmoniParam_t )        /* ioctl command for drvCPURTT_UDF_SmoniApiExecute */
+#define DRV_CPURTT_IOCTL_DEVFBISTINIT    _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 3 )                             /* ioctl command for drvCPURTT_UDF_FbistInitialize */
+#define DRV_CPURTT_IOCTL_DEVFBISTDEINIT  _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 4 )                             /* ioctl command for drvCPURTT_UDF_FbistDeInitialize */
+#define DRV_CPURTT_IOCTL_WAIT_CALLBACK  _IOWR( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 5 , drvCPURTT_CallbackInfo_t)  /* ioctl command for drvCPURTT_UDF_WaitCallback */
 
+/* Definition of the kernel CPURTT device module name */
 #define UDF_CPURTT_DRIVER_NAME        "cpurttdrv"     /* cpurtt driver name */
 #define UDF_CPURTT_CLASS_NAME         "cpurttmod"     /* cpurtt driver class name */
 #define UDF_CPURTT_MODULE_NAME        "cpurttmod0"    /* cpurtt driver minor number */
 
+/* Definition for callback control information */
 #define DRV_CPURTT_CB_REQ_NON           (0x00000000U)
 #define DRV_CPURTT_CB_REQ_CALLBACK      (0x00000001U)
 #define DRV_CPURTT_CB_REQ_SETOUTPUT     (0x00000001U)

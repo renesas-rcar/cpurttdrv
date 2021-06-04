@@ -5,7 +5,7 @@
  * CREATED       : 2021.04.17
  * MODIFIED      : -
  * AUTHOR        : Renesas Electronics Corporation
- * TARGET DEVICE : R-Car V3H
+ * TARGET DEVICE : R-Car V3Hv2
  * TARGET OS     : BareMetal
  * HISTORY       : -
  */
