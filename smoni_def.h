@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018-2020 Renesas Electronics Corporation. All rights reserved.
+ * Copyright (c) 2018-2021 Renesas Electronics Corporation. All rights reserved.
  *
  * DESCRIPTION   : The source code of Secure Monitor.
  * CREATED       : 2018.06.13

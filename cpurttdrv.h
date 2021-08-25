@@ -3,7 +3,7 @@
  * FILE          : cpurttdrv.h
  * DESCRIPTION   : CPU Runtime Test driver for sample code
  * CREATED       : 2021.04.17
- * MODIFIED      : -
+ * MODIFIED      : 2021.07.05
  * AUTHOR        : Renesas Electronics Corporation
  * TARGET DEVICE : R-Car V3Hv2
  * TARGET OS     : BareMetal
@@ -133,6 +133,9 @@
 #define CB_QUEUE_STATUS_EMPTY   0x00
 #define CB_QUEUE_STATUS_ENA     0x01
 #define CB_QUEUE_STATUS_FULL    0x02
+
+#define UDF_CPURTT_DRIVER_NAME        "cpurttdrv"     /* cpurtt driver name */
+#define UDF_CPURTT_CLASS_NAME         "cpurttmod"     /* cpurtt driver class name */
 
 /* Structure of RTTFINISH1 */
 typedef union

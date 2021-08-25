@@ -3,13 +3,15 @@
  * FILE          : cpurttdrv.c
  * DESCRIPTION   : CPU Runtime Test driver for sample code
  * CREATED       : 2021.04.20
- * MODIFIED      : 2021.05.31
+ * MODIFIED      : 2021.08.24
  * AUTHOR        : Renesas Electronics Corporation
  * TARGET DEVICE : R-Car V3Hv2
  * TARGET OS     : BareMetal
  * HISTORY       : 
  *                 2021.05.31 
  *                            Modify so that ioctl arguments can be held correctly when multiple ioctls are executed.
+ *                 2021.08.24 
+ *                            Fixed the judgment method of register_chrdev.
  */
 /****************************************************************************/
 /*
@@ -58,7 +60,7 @@
 
 #undef IS_INTERRUPT
 
-#define DRIVER_VERSION "0.3"
+#define DRIVER_VERSION "1.0"
 
 /***********************************************************
  Macro definitions
@@ -1442,11 +1444,16 @@ static int CpurttDrv_init(void)
     unsigned int cnt;
 
     /* register character device for cpurttdrv */
-    cpurtt_major = register_chrdev(cpurtt_major, UDF_CPURTT_DRIVER_NAME, &s_CpurttDrv_fops);
-    if (cpurtt_major < 0)
+    ret  = register_chrdev(cpurtt_major, UDF_CPURTT_DRIVER_NAME, &s_CpurttDrv_fops);
+    if (ret < 0)
     {
         pr_err( "register_chrdev = %d\n", cpurtt_major);
         return -EFAULT;
+    }
+    else
+    {
+        cpurtt_major = (unsigned int)ret;
+        ret = 0;
     }
 
     /* create class module */

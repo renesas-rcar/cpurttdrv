@@ -3,7 +3,7 @@
  * FILE          : cpurtt_common.h
  * DESCRIPTION   : CPU Runtime Test driver
  * CREATED       : 2021.02.15
- * MODIFIED      : 2021.04.15
+ * MODIFIED      : 2021.07.27
  * AUTHOR        : Renesas Electronics Corporation
  * TARGET DEVICE : R-Car V3Hv2
  * TARGET OS     : BareMetal
@@ -11,6 +11,8 @@
  *                 2021.02.15 Create New File corresponding to BareMetal
  *                 2021.03.12 Fix for beta2 release
  *                 2021.04.15 Fix for beta3 release
+ *                 2021.05.28 Fix for beta4 release
+ *                 2021.07.27 Fix for FC release
  */
 /****************************************************************************/
 /*
@@ -32,6 +34,9 @@ extern "C"
 {
 #endif
 
+#include "cpurtt_common_userdef.h"
+
+/* TraceabilityID: V3X_RTT_CD_040304_structure_001 */
 /* for smoni_api parameter */
 typedef struct {
     uint32_t Index;
@@ -39,44 +44,59 @@ typedef struct {
     uint32_t RetArg;
     void*    Arg;
 } drvCPURTT_SmoniParam_t;
+/* Covers: V3X_RTT_UD_040304_structure_001 */
 
+/* TraceabilityID: V3X_RTT_CD_040304_structure_002 */
 typedef struct {
     uint32_t Rttex;
 } drvCPURTT_A1rttParam_t;
+/* Covers: V3X_RTT_UD_040304_structure_002 */
 
+/* TraceabilityID: V3X_RTT_CD_040304_structure_003 */
 typedef struct {
     uint32_t Rttex;
     uint32_t Sgi;
 } drvCPURTT_A2rttParam_t;
+/* Covers: V3X_RTT_UD_040304_structure_003 */
 
+/* TraceabilityID: V3X_RTT_CD_040304_structure_004 */
 typedef struct {
     uintptr_t AddrBuf;
     uintptr_t DataBuf;
     uint32_t RegCount;
-
 } drvCPURTT_FbaWriteParam_t;
+/* Covers: V3X_RTT_UD_040304_structure_004 */
 
+/* TraceabilityID: V3X_RTT_CD_040304_structure_005 */
 typedef struct {
     uintptr_t AddrBuf;
     uintptr_t DataBuf;
     uint32_t RegCount;
 } drvCPURTT_FbaReadParam_t;
+/* Covers: V3X_RTT_UD_040304_structure_005 */
 
+/* TraceabilityID: V3X_RTT_CD_040304_structure_006 */
 typedef struct {
     uint32_t Setting;
     uint32_t TargetReg;
 } drvCPURTT_ConfigRegCheckParam_t;
+/* Covers: V3X_RTT_UD_040304_structure_006 */
 
+/* TraceabilityID: V3X_RTT_CD_040304_structure_007 */
 typedef struct {
     uint32_t Target;
     uint32_t MicroSec;
 } drvCPURTT_SetTimeoutParam_t;
+/* Covers: V3X_RTT_UD_040304_structure_007 */
 
+/* TraceabilityID: V3X_RTT_CD_040304_structure_008 */
 typedef struct {
     uint32_t Rttex;
     uint32_t TargetHierarchy;
 } drvCPURTT_SelfCheckParam_t;
+/* Covers: V3X_RTT_UD_040304_structure_008 */
 
+/* TraceabilityID: V3X_RTT_CD_040408_enumeration_001 */
 /* index for smoni api */
 typedef enum
 {
@@ -91,33 +111,22 @@ typedef enum
     DRV_CPURTT_SMONIAPI_SELFCHECK,
     DRV_CPURTT_SMONIAPI_SMONITABLE_MAX
 } drvCPURTT_SmoniTable_t;
+/* Covers: V3X_RTT_UD_040408_enumeration_001 */
 
+/* TraceabilityID: V3X_RTT_CD_040305_structure_001 */
 typedef struct {
     uint32_t FbistCbRequest;
     uint32_t BusCheckCbRequest;
     uint32_t RfsoOutputPinRequest;
 } drvCPURTT_CallbackInfo_t;
+/* Covers: V3X_RTT_UD_040305_structure_001 */
 
-/* Command definition for ioctl */
-#define DRV_CPURTT_IOCTL_MAGIC  (0x9AU)
-#define DRV_CPURTT_CMD_CODE     (0x1000U)
-
-#define DRV_CPURTT_IOCTL_DEVINIT    _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE )                                      /* ioctl command for drvCPURTT_UDF_DrvInitialize */
-#define DRV_CPURTT_IOCTL_DEVDEINIT  _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 1 )                                  /* ioctl command for drvCPURTT_UDF_DrvDeInitialize */
-#define DRV_CPURTT_IOCTL_SMONI      _IOWR( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 2, drvCPURTT_SmoniParam_t )        /* ioctl command for drvCPURTT_UDF_SmoniApiExecute */
-#define DRV_CPURTT_IOCTL_DEVFBISTINIT    _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 3 )                             /* ioctl command for drvCPURTT_UDF_FbistInitialize */
-#define DRV_CPURTT_IOCTL_DEVFBISTDEINIT  _IO( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 4 )                             /* ioctl command for drvCPURTT_UDF_FbistDeInitialize */
-#define DRV_CPURTT_IOCTL_WAIT_CALLBACK  _IOWR( DRV_CPURTT_IOCTL_MAGIC, DRV_CPURTT_CMD_CODE + 5 , drvCPURTT_CallbackInfo_t)  /* ioctl command for drvCPURTT_UDF_WaitCallback */
-
-/* Definition of the kernel CPURTT device module name */
-#define UDF_CPURTT_DRIVER_NAME        "cpurttdrv"     /* cpurtt driver name */
-#define UDF_CPURTT_CLASS_NAME         "cpurttmod"     /* cpurtt driver class name */
-#define UDF_CPURTT_MODULE_NAME        "cpurttmod0"    /* cpurtt driver minor number */
-
+/* TraceabilityID: V3X_RTT_CD_040506_definition_001 */
 /* Definition for callback control information */
 #define DRV_CPURTT_CB_REQ_NON           (0x00000000U)
 #define DRV_CPURTT_CB_REQ_CALLBACK      (0x00000001U)
 #define DRV_CPURTT_CB_REQ_SETOUTPUT     (0x00000001U)
+/* Covers: V3X_RTT_UD_040506_definition_001 */
 
 #ifdef __cplusplus
 }

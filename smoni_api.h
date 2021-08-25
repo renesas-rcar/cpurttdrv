@@ -1,9 +1,9 @@
 /*******************************************************************************
- * Copyright (c) 2018-2020 Renesas Electronics Corporation. All rights reserved.
+ * Copyright (c) 2018-2021 Renesas Electronics Corporation. All rights reserved.
  *
  * DESCRIPTION   : The source code of Secure Monitor.
  * CREATED       : 2018.06.13
- * MODIFIED      : 2018.09.27
+ * MODIFIED      : 2021.02.08
  * TARGET OS     : OS agnostic.
  ******************************************************************************/
 
@@ -15,7 +15,7 @@ extern "C"
 {
 #endif
 
-//#include <linux/types.h>
+#include <linux/types.h>
 
 uint32_t Smoni_SetTimeout(uint32_t LuiTargetTimeout, uint32_t LuiMicroSecond);
 uint32_t Smoni_ConfigurationRegisterCheck(uint32_t LuiSetting, uint32_t LuiTarget);
